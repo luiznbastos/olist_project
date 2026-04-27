@@ -1,0 +1,31 @@
+name: 'olist_dbt'
+version: '1.0.0'
+profile: 'olist_dbt'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+vars:
+  data_lake_path: "{{ env_var('OLIST_DATA_LAKE_PATH', 'data_lake') }}"
+
+models:
+  olist_dbt:
+    +materialized: view
+    raw:
+      +schema: raw
+    bronze_layer:
+      +materialized: external
+      +schema: bronze
+      +format: parquet
+    silver_layer:
+      +materialized: external
+      +schema: silver
+      +format: parquet
+    gold_layer:
+      +materialized: external
+      +schema: gold
+      +format: parquet

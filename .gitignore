@@ -1,0 +1,31 @@
+.env
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.vscode
+.idea
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Local agent / IDE state
+.claude/
+
+# Olist data lake — raw zip and derived Parquet files (regenerable by setenv.sh / dbt)
+data_lake/raw/
+data_lake/bronze/
+data_lake/silver/
+data_lake/gold/
+
+# dbt build artifacts
+olist_dbt/target/
+olist_dbt/dbt_packages/
+olist_dbt/logs/
+olist_dbt/.user.yml
+
+# Cube persistent store (regenerated at runtime)
+olist_cube/.cubestore/

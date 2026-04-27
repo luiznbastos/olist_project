@@ -1,0 +1,42 @@
+cubes:
+  - name: customers
+    sql: "SELECT * FROM read_parquet('/data_lake/silver/dim_customers.parquet')"
+    description: "Customer dimension enriched with lifetime order metrics."
+
+    measures:
+      - name: count
+        type: count
+        description: "Total number of unique customers"
+
+      - name: avg_total_spent
+        type: avg
+        sql: total_spent
+        description: "Average lifetime spend per customer"
+
+      - name: avg_delivery_days
+        type: avg
+        sql: avg_delivery_days
+        description: "Average delivery time experienced across all customers"
+
+    dimensions:
+      - name: customer_id
+        sql: customer_id
+        type: string
+        primary_key: true
+
+      - name: customer_unique_id
+        sql: customer_unique_id
+        type: string
+        description: "Stable customer identifier across multiple orders"
+
+      - name: customer_city
+        sql: customer_city
+        type: string
+
+      - name: customer_state
+        sql: customer_state
+        type: string
+
+      - name: customer_zip_code_prefix
+        sql: customer_zip_code_prefix
+        type: string

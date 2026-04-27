@@ -1,0 +1,33 @@
+cubes:
+  - name: sellers
+    sql: "SELECT * FROM read_parquet('/data_lake/silver/dim_sellers.parquet')"
+    description: "Seller dimension enriched with revenue and review metrics."
+
+    measures:
+      - name: count
+        type: count
+        description: "Total number of distinct sellers"
+
+      - name: avg_revenue
+        type: avg
+        sql: total_revenue
+        description: "Average total revenue per seller"
+
+      - name: avg_rating
+        type: avg
+        sql: avg_rating
+        description: "Average seller review rating (1–5)"
+
+    dimensions:
+      - name: seller_id
+        sql: seller_id
+        type: string
+        primary_key: true
+
+      - name: seller_city
+        sql: seller_city
+        type: string
+
+      - name: seller_state
+        sql: seller_state
+        type: string

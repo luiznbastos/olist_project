@@ -1,0 +1,26 @@
+cubes:
+  - name: geolocation
+    sql: "SELECT * FROM read_parquet('/data_lake/silver/dim_geolocation.parquet')"
+    description: "Deduplicated zip-code dimension with centroid coordinates."
+
+    dimensions:
+      - name: geolocation_zip_code_prefix
+        sql: geolocation_zip_code_prefix
+        type: string
+        primary_key: true
+
+      - name: geolocation_city
+        sql: geolocation_city
+        type: string
+
+      - name: geolocation_state
+        sql: geolocation_state
+        type: string
+
+      - name: geolocation_lat
+        sql: geolocation_lat
+        type: number
+
+      - name: geolocation_lng
+        sql: geolocation_lng
+        type: number

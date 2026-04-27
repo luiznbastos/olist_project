@@ -1,0 +1,76 @@
+networks:
+  olist_net:
+    driver: bridge
+
+volumes:
+  cube_db:  # persistent DuckDB file for Cube pre-aggregations
+
+services:
+  cube:
+    image: cubejs/cube:latest
+    ports:
+      - "4000:4000"    # REST/GraphQL API + Playground UI
+      - "15432:15432"  # SQL API (Postgres protocol)
+    volumes:
+      - ./olist_cube:/cube/conf       # Cube config + YAML model definitions
+      - ./data_lake:/data_lake:ro     # Parquet source files (read-only)
+      - cube_db:/cube/db              # persistent DuckDB database (writable)
+    environment:
+      - CUBEJS_DB_TYPE=duckdb
+      - CUBEJS_DB_DUCKDB_DATABASE_PATH=/cube/db/cube.duckdb
+      - CUBEJS_API_SECRET=${CUBEJS_API_SECRET:-dev-secret}
+      - CUBEJS_DEV_MODE=true
+      - CUBEJS_LOG_LEVEL=warn
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/readyz', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - olist_net
+
+  olist_mcp:
+    build: ./olist_mcp
+    ports:
+      - "8000:8000"
+    depends_on:
+      cube:
+        condition: service_healthy
+    volumes:
+      - ./data_lake:/data_lake:ro
+    environment:
+      - DATA_LAKE_PATH=/data_lake
+      - DUCKDB_LAYERS=${DUCKDB_LAYERS:-Silver}
+      - CUBE_API_URL=http://cube:4000
+      - CUBE_API_SECRET=${CUBEJS_API_SECRET:-dev-secret}
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+    networks:
+      - olist_net
+
+  olist_agent:
+    build: ./olist_agent
+    ports:
+      - "8001:8001"
+    depends_on:
+      - olist_mcp
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - MCP_SERVER_URL=http://olist_mcp:8000/mcp
+      - HOST=0.0.0.0
+      - PORT=8001
+    networks:
+      - olist_net
+
+  olist_streamlit:
+    build: ./olist_streamlit
+    ports:
+      - "8501:8501"
+    depends_on:
+      - olist_agent
+    environment:
+      - AGENT_URL=http://olist_agent:8001/ask
+    networks:
+      - olist_net

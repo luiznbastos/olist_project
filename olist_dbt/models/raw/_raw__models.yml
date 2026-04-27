@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: raw_customers
+    config:
+      materialized: view
+    description: "View over olist_customers_dataset.parquet. One row per order-customer link."
+
+  - name: raw_geolocation
+    config:
+      materialized: view
+    description: "View over olist_geolocation_dataset.parquet. Lat/lng per zip code prefix."
+
+  - name: raw_order_items
+    config:
+      materialized: view
+    description: "View over olist_order_items_dataset.parquet. One row per item within an order."
+
+  - name: raw_order_payments
+    config:
+      materialized: view
+    description: "View over olist_order_payments_dataset.parquet. Payment methods per order."
+
+  - name: raw_order_reviews
+    config:
+      materialized: view
+    description: "View over olist_order_reviews_dataset.parquet. Customer review scores and comments."
+
+  - name: raw_orders
+    config:
+      materialized: view
+    description: "View over olist_orders_dataset.parquet. Core order lifecycle timestamps and status."
+
+  - name: raw_products
+    config:
+      materialized: view
+    description: "View over olist_products_dataset.parquet. Product catalog with dimensions."
+
+  - name: raw_sellers
+    config:
+      materialized: view
+    description: "View over olist_sellers_dataset.parquet. Seller geographic data."
+
+  - name: raw_product_category_name_translation
+    config:
+      materialized: view
+    description: "View over product_category_name_translation.parquet. Portuguese → English category names."

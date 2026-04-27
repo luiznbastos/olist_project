@@ -1,0 +1,35 @@
+cubes:
+  - name: products
+    sql: "SELECT * FROM read_parquet('/data_lake/silver/dim_products.parquet')"
+    description: "Product dimension enriched with sales metrics and review scores."
+
+    measures:
+      - name: count
+        type: count
+        description: "Total number of distinct products"
+
+      - name: avg_price
+        type: avg
+        sql: avg_price
+        description: "Average product price across all orders"
+
+      - name: avg_rating
+        type: avg
+        sql: avg_rating
+        description: "Average product review rating (1–5)"
+
+    dimensions:
+      - name: product_id
+        sql: product_id
+        type: string
+        primary_key: true
+
+      - name: product_category_name
+        sql: product_category_name
+        type: string
+        description: "Product category in Portuguese"
+
+      - name: product_category_name_english
+        sql: product_category_name_english
+        type: string
+        description: "Product category translated to English"

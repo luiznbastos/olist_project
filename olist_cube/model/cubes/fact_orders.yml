@@ -1,0 +1,105 @@
+cubes:
+  - name: orders
+    sql: "SELECT * FROM read_parquet('/data_lake/silver/fact_orders.parquet')"
+    description: >
+      Order line-item fact table. Grain: one row per order item.
+      Payments are pre-aggregated at order level to avoid fanout.
+
+    joins:
+      - name: customers
+        sql: "{CUBE}.customer_id = {customers}.customer_id"
+        relationship: many_to_one
+
+      - name: products
+        sql: "{CUBE}.product_id = {products}.product_id"
+        relationship: many_to_one
+
+      - name: sellers
+        sql: "{CUBE}.seller_id = {sellers}.seller_id"
+        relationship: many_to_one
+
+    measures:
+      - name: count
+        type: count
+        description: "Total number of order line items"
+
+      - name: order_count
+        type: count_distinct
+        sql: order_id
+        description: "Number of distinct orders (deduplicates multi-item orders)"
+
+      - name: total_revenue
+        type: sum
+        sql: price
+        description: "Total revenue — sum of item prices (GMV)"
+
+      - name: total_freight
+        type: sum
+        sql: freight_value
+        description: "Total freight cost"
+
+      - name: avg_order_value
+        type: avg
+        sql: price
+        description: "Average item price"
+
+      - name: avg_delivery_days
+        type: avg
+        sql: delivery_days
+        description: "Average delivery time in days from purchase to delivery"
+
+      - name: delivered_order_count
+        type: count_distinct
+        sql: "CASE WHEN order_status = 'delivered' THEN order_id END"
+        description: "Number of successfully delivered distinct orders"
+
+    dimensions:
+      - name: order_id
+        sql: order_id
+        type: string
+        primary_key: true
+
+      - name: customer_id
+        sql: customer_id
+        type: string
+
+      - name: product_id
+        sql: product_id
+        type: string
+
+      - name: seller_id
+        sql: seller_id
+        type: string
+
+      - name: order_status
+        sql: order_status
+        type: string
+        description: "delivered, shipped, processing, canceled, unavailable, invoiced, created, approved"
+
+      - name: primary_payment_type
+        sql: primary_payment_type
+        type: string
+        description: "Primary payment method: credit_card, boleto, voucher, debit_card, not_defined"
+
+      - name: purchase_date
+        sql: order_purchase_timestamp
+        type: time
+
+      - name: delivered_date
+        sql: order_delivered_customer_date
+        type: time
+
+      - name: estimated_delivery_date
+        sql: order_estimated_delivery_date
+        type: time
+
+    pre_aggregations:
+      - name: daily_orders
+        measures:
+          - orders.order_count
+          - orders.total_revenue
+          - orders.avg_delivery_days
+        dimensions:
+          - orders.order_status
+        time_dimension: orders.purchase_date
+        granularity: day

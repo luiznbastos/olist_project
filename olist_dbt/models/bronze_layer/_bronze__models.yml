@@ -1,0 +1,122 @@
+version: 2
+
+models:
+  - name: bronze_customers
+    description: "Cleaned customers — normalized city/state casing."
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+      - name: customer_unique_id
+        tests:
+          - not_null
+
+  - name: bronze_geolocation
+    description: "Cleaned geolocation — lat/lng cast to double, normalized city/state casing."
+    columns:
+      - name: geolocation_zip_code_prefix
+        tests:
+          - not_null
+
+  - name: bronze_order_items
+    description: "Cleaned order items — numeric types enforced, timestamp cast."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [order_id, order_item_id]
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+      - name: product_id
+        tests:
+          - not_null
+      - name: seller_id
+        tests:
+          - not_null
+      - name: price
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: freight_value
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: bronze_order_payments
+    description: "Cleaned order payments — numeric types enforced."
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+      - name: payment_type
+        tests:
+          - accepted_values:
+              values: ['credit_card', 'boleto', 'voucher', 'debit_card', 'not_defined']
+      - name: payment_value
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: bronze_order_reviews
+    description: "Cleaned order reviews — null comments filled with N/A, timestamps cast, review_score as integer."
+    tests:
+      # review_id is not unique in the source — same ID can appear for different orders.
+      # The natural key is the (review_id, order_id) combination.
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [review_id, order_id]
+    columns:
+      - name: review_id
+        tests:
+          - not_null
+      - name: order_id
+        tests:
+          - not_null
+      - name: review_score
+        tests:
+          - not_null
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+
+  - name: bronze_orders
+    description: "Cleaned orders — all timestamp columns cast from string to timestamp."
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        tests:
+          - not_null
+      - name: order_status
+        tests:
+          - accepted_values:
+              values:
+                - delivered
+                - shipped
+                - processing
+                - canceled
+                - unavailable
+                - invoiced
+                - created
+                - approved
+      - name: order_purchase_timestamp
+        tests:
+          - not_null
+
+  - name: bronze_products
+    description: "Cleaned products — joined with category translation for English name, numeric types enforced, typo column names fixed."
+    columns:
+      - name: product_id
+        tests:
+          - not_null
+          - unique
+
+  - name: bronze_sellers
+    description: "Cleaned sellers — normalized city/state casing."
+    columns:
+      - name: seller_id
+        tests:
+          - not_null
+          - unique

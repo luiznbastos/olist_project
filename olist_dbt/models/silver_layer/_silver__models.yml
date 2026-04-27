@@ -1,0 +1,97 @@
+version: 2
+
+models:
+  - name: dim_customers
+    description: "Customer dimension enriched with order metrics — avg order value, total spend, delivery time."
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+      - name: customer_unique_id
+        tests:
+          - not_null
+      - name: total_delivered_orders
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: total_spent
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: dim_products
+    description: "Product dimension enriched with sales metrics and review scores."
+    columns:
+      - name: product_id
+        tests:
+          - not_null
+          - unique
+      - name: total_orders
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: dim_sellers
+    description: "Seller dimension enriched with revenue and review metrics."
+    columns:
+      - name: seller_id
+        tests:
+          - not_null
+          - unique
+      - name: total_orders
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: total_revenue
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: fact_orders
+    description: "Order-item grain fact table. Payments pre-aggregated to order level to avoid fanout."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [order_id, order_item_id]
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_id
+      - name: product_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_products')
+              field: product_id
+      - name: seller_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_sellers')
+              field: seller_id
+      - name: price
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+
+  - name: dim_date
+    description: "Calendar dimension spanning 2016–2019. Attributes: year, quarter, month, week, day-of-week, is_weekend, period labels."
+    columns:
+      - name: date_day
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_geolocation
+    description: "Deduplicated zip-code dimension. One row per zip prefix with centroid lat/lng and most frequent city/state."
+    columns:
+      - name: geolocation_zip_code_prefix
+        tests:
+          - not_null
+          - unique

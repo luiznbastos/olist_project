@@ -1,0 +1,8 @@
+# Cube Core — olist semantic layer
+# DB connection is configured entirely via environment variables:
+#   CUBEJS_DB_TYPE=duckdb
+#   CUBEJS_DEV_MODE=true
+#   CUBEJS_API_SECRET=...
+#
+# Parquet files are mounted read-only at /data_lake inside the container.
+# Models live in model/cubes/*.yml and reference them via read_parquet().

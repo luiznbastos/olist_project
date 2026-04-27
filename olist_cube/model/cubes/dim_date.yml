@@ -1,0 +1,48 @@
+cubes:
+  - name: dates
+    sql: "SELECT * FROM read_parquet('/data_lake/silver/dim_date.parquet')"
+    description: "Calendar dimension spanning 2016–2019 for time-based analysis."
+
+    dimensions:
+      - name: date_day
+        sql: date_day
+        type: time
+        primary_key: true
+
+      - name: year
+        sql: "CAST(year AS VARCHAR)"
+        type: string
+
+      - name: quarter
+        sql: "CAST(quarter AS VARCHAR)"
+        type: string
+
+      - name: month_number
+        sql: "CAST(month_number AS VARCHAR)"
+        type: string
+
+      - name: month_name
+        sql: month_name
+        type: string
+
+      - name: week_of_year
+        sql: "CAST(week_of_year AS VARCHAR)"
+        type: string
+
+      - name: day_name
+        sql: day_name
+        type: string
+
+      - name: is_weekend
+        sql: "CAST(is_weekend AS VARCHAR)"
+        type: string
+
+      - name: year_quarter
+        sql: year_quarter
+        type: string
+        description: "e.g. Q3 2017"
+
+      - name: year_month
+        sql: year_month
+        type: string
+        description: "e.g. 2017-09"

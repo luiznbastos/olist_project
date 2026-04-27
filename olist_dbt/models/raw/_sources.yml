@@ -1,0 +1,154 @@
+version: 2
+
+sources:
+  - name: olist
+    description: "Olist Brazilian e-commerce dataset. Raw Parquet files in data_lake/raw/."
+    tables:
+      - name: customers
+        identifier: olist_customers_dataset
+        description: "Customer data with geographic identifiers."
+        columns:
+          - name: customer_id
+            description: "Unique key for each order. Maps to order_id in the orders table."
+          - name: customer_unique_id
+            description: "Unique identifier for the customer across orders."
+          - name: customer_zip_code_prefix
+            description: "First 5 digits of the customer zip code."
+          - name: customer_city
+            description: "Customer city name."
+          - name: customer_state
+            description: "Customer state (2-letter code)."
+
+      - name: geolocation
+        identifier: olist_geolocation_dataset
+        description: "Brazilian zip code latitude/longitude data."
+        columns:
+          - name: geolocation_zip_code_prefix
+            description: "First 5 digits of the zip code."
+          - name: geolocation_lat
+            description: "Latitude."
+          - name: geolocation_lng
+            description: "Longitude."
+          - name: geolocation_city
+            description: "City name."
+          - name: geolocation_state
+            description: "State (2-letter code)."
+
+      - name: order_items
+        identifier: olist_order_items_dataset
+        description: "Items purchased within each order."
+        columns:
+          - name: order_id
+            description: "Order identifier."
+          - name: order_item_id
+            description: "Sequential number identifying the item within the order."
+          - name: product_id
+            description: "Product identifier."
+          - name: seller_id
+            description: "Seller identifier."
+          - name: shipping_limit_date
+            description: "Seller shipping deadline."
+          - name: price
+            description: "Item price."
+          - name: freight_value
+            description: "Item freight value (shared proportionally when order has multiple items)."
+
+      - name: order_payments
+        identifier: olist_order_payments_dataset
+        description: "Payment options for each order."
+        columns:
+          - name: order_id
+            description: "Order identifier."
+          - name: payment_sequential
+            description: "Sequence of payment methods used (customer may pay with more than one)."
+          - name: payment_type
+            description: "Payment method: credit_card, boleto, voucher, debit_card."
+          - name: payment_installments
+            description: "Number of installments chosen."
+          - name: payment_value
+            description: "Transaction value."
+
+      - name: order_reviews
+        identifier: olist_order_reviews_dataset
+        description: "Reviews left by customers after order delivery."
+        columns:
+          - name: review_id
+            description: "Unique review identifier."
+          - name: order_id
+            description: "Order identifier."
+          - name: review_score
+            description: "Score from 1 to 5 given by the customer."
+          - name: review_comment_title
+            description: "Title of the review comment (optional)."
+          - name: review_comment_message
+            description: "Body of the review comment (optional)."
+          - name: review_creation_date
+            description: "Timestamp when the review survey was sent."
+          - name: review_answer_timestamp
+            description: "Timestamp when the customer answered the survey."
+
+      - name: orders
+        identifier: olist_orders_dataset
+        description: "Core orders table — one row per order."
+        columns:
+          - name: order_id
+            description: "Unique order identifier."
+          - name: customer_id
+            description: "Customer key, links to customers table."
+          - name: order_status
+            description: "Status: delivered, shipped, processing, canceled, etc."
+          - name: order_purchase_timestamp
+            description: "Timestamp of order placement."
+          - name: order_approved_at
+            description: "Timestamp of payment approval."
+          - name: order_delivered_carrier_date
+            description: "Timestamp when order was handed to carrier."
+          - name: order_delivered_customer_date
+            description: "Timestamp when order was delivered to customer."
+          - name: order_estimated_delivery_date
+            description: "Estimated delivery date at purchase time."
+
+      - name: products
+        identifier: olist_products_dataset
+        description: "Product catalog with dimensions and category."
+        columns:
+          - name: product_id
+            description: "Unique product identifier."
+          - name: product_category_name
+            description: "Category name in Portuguese."
+          - name: product_name_lenght
+            description: "Number of characters in the product name."
+          - name: product_description_lenght
+            description: "Number of characters in the product description."
+          - name: product_photos_qty
+            description: "Number of product photos."
+          - name: product_weight_g
+            description: "Product weight in grams."
+          - name: product_length_cm
+            description: "Product length in centimeters."
+          - name: product_height_cm
+            description: "Product height in centimeters."
+          - name: product_width_cm
+            description: "Product width in centimeters."
+
+      - name: sellers
+        identifier: olist_sellers_dataset
+        description: "Seller data with geographic identifiers."
+        columns:
+          - name: seller_id
+            description: "Unique seller identifier."
+          - name: seller_zip_code_prefix
+            description: "First 5 digits of the seller zip code."
+          - name: seller_city
+            description: "Seller city name."
+          - name: seller_state
+            description: "Seller state (2-letter code)."
+
+      - name: product_category_name_translation
+        identifier: product_category_name_translation
+        description: "Lookup table mapping Portuguese category names to English."
+        columns:
+          - name: product_category_name
+            description: "Category name in Portuguese."
+          - name: product_category_name_english
+            description: "Category name translated to English."

@@ -1,0 +1,11 @@
+olist_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: '/tmp/olist_dbt.duckdb'
+      external_root: "{{ env_var('OLIST_DATA_LAKE_PATH', 'data_lake') }}"
+      settings:
+        memory_limit: '4GB'
+        threads: 4
+        preserve_insertion_order: false
