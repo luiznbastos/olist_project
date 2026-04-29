@@ -1,224 +1,111 @@
 #!/usr/bin/env bash
-# setenv.sh — setup and run the Olist analytics stack
+# setenv.sh — host-side data preparation for the Olist analytics stack.
+#
+# The runtime services (cube, olist_mcp, olist_agent, olist_streamlit) are
+# managed by Docker Compose. This script only covers tasks that must run on
+# the host because they write to data_lake/ (the containers mount it read-only):
+#
+#   - unzipping olist.zip into data_lake/raw/*.parquet
+#   - running dbt to build data_lake/{bronze,silver,gold}/*.parquet
 #
 # Usage:
-#   source setenv.sh          # export env vars into your current shell
-#   bash setenv.sh setup      # one-time setup: install deps + init data lake + dbt deps
-#   bash setenv.sh mcp        # start olist_mcp   (port 8000)
-#   bash setenv.sh agent      # start olist_agent (port 8001)
-#   bash setenv.sh streamlit  # start olist_streamlit (port 8501)
-#   bash setenv.sh start      # start all three servers in background
-#   bash setenv.sh stop       # kill all background servers started by this script
+#   bash setenv.sh setup       One-shot: venv + init data lake + dbt deps + dbt run
+#   bash setenv.sh init        Unzip data_lake/olist.zip → data_lake/raw/*.parquet
+#   bash setenv.sh dbt-deps    Install dbt packages
+#   bash setenv.sh dbt-debug   Verify dbt's DuckDB connection
+#   bash setenv.sh dbt-run     Build bronze/silver/gold Parquet from raw
+#
+# Service lifecycle is managed by Docker Compose:
+#   docker compose up -d --build      # start the stack
+#   docker compose down               # stop and remove containers
+#   docker compose logs -f olist_mcp  # tail logs of one service
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OLIST_DBT_DIR="$SCRIPT_DIR/olist_dbt"
-OLIST_MCP_DIR="$SCRIPT_DIR/olist_mcp"
-OLIST_AGENT_DIR="$SCRIPT_DIR/olist_agent"
-OLIST_STREAMLIT_DIR="$SCRIPT_DIR/olist_streamlit"
-
-# ------------------------------------------------------------------
-# Environment variables — edit these before running
-# ------------------------------------------------------------------
-
-export OLIST_DATA_LAKE_PATH="$SCRIPT_DIR/data_lake"  # absolute path fed to olist_mcp
-
-export OPENAI_API_KEY="${OPENAI_API_KEY:-}"              # required by olist_agent; set in env or fill in here
-
-# Optional overrides (defaults shown)
-export MCP_SERVER_URL="http://localhost:8000/mcp"
-export AGENT_URL="http://localhost:8001/ask"
-export DUCKDB_LAYERS="Silver"                            # comma-separated; e.g. "Raw,Bronze,Silver,Gold"
+DBT_DIR="$SCRIPT_DIR/olist_dbt"
+DBT_VENV="$DBT_DIR/.venv"
+DBT_BIN="$DBT_VENV/bin"
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
 
-_check_openai_key() {
-  if [[ -z "${OPENAI_API_KEY:-}" ]]; then
-    echo "ERROR: OPENAI_API_KEY is not set."
-    echo "  Set it in your shell:  export OPENAI_API_KEY=sk-..."
-    echo "  Or fill it in setenv.sh before running."
-    exit 1
+_ensure_dbt_venv() {
+  if [[ ! -d "$DBT_VENV" ]]; then
+    echo "Creating dbt venv at $DBT_VENV ..."
+    python3 -m venv "$DBT_VENV"
+    "$DBT_BIN/pip" install -q -r "$DBT_DIR/requirements.txt"
   fi
 }
 
-_venv() {
-  # Print the expected venv Python path for a given repo directory.
-  echo "$1/.venv/bin/python"
-}
-
-_pip() {
-  "$1/.venv/bin/pip" install -q -r "$1/requirements.txt"
-}
-
-_create_venv() {
-  local dir="$1"
-  if [[ ! -d "$dir/.venv" ]]; then
-    echo "  Creating venv in $dir/.venv ..."
-    python3 -m venv "$dir/.venv"
-  fi
+_dbt() {
+  (cd "$DBT_DIR" && "$DBT_BIN/dbt" "$@" --profiles-dir .)
 }
 
 # ------------------------------------------------------------------
-# Setup (one-time)
+# Commands
 # ------------------------------------------------------------------
 
-setup() {
-  echo "==> [1/4] Installing olist_dbt dependencies ..."
-  _create_venv "$OLIST_DBT_DIR"
-  _pip "$OLIST_DBT_DIR"
-
-  echo "==> [2/4] Initialising data lake (unzip + CSV → Parquet) ..."
-  (cd "$OLIST_DBT_DIR" && "$OLIST_DBT_DIR/.venv/bin/python" scripts/init_data_lake.py)
-
-  echo "==> [3/4] Installing dbt packages ..."
-  (cd "$OLIST_DBT_DIR" && "$OLIST_DBT_DIR/.venv/bin/dbt" deps --profiles-dir .)
-
-  echo "==> [4/4] Installing olist_mcp, olist_agent, olist_streamlit dependencies ..."
-  for repo in "$OLIST_MCP_DIR" "$OLIST_AGENT_DIR" "$OLIST_STREAMLIT_DIR"; do
-    _create_venv "$repo"
-    _pip "$repo"
-  done
-
-  echo ""
-  echo "Setup complete."
-  echo "Next: bash setenv.sh start"
+init_data_lake() {
+  _ensure_dbt_venv
+  echo "==> Initialising data lake (unzip olist.zip → data_lake/raw) ..."
+  (cd "$DBT_DIR" && "$DBT_BIN/python" scripts/init_data_lake.py)
 }
 
-# ------------------------------------------------------------------
-# Individual server launchers
-# ------------------------------------------------------------------
-
-start_mcp() {
-  echo "Starting olist_mcp on port 8000 ..."
-  (
-    cd "$OLIST_MCP_DIR"
-    export OLIST_DATA_LAKE_PATH
-    export DUCKDB_LAYERS
-    "$OLIST_MCP_DIR/.venv/bin/python" -m src.server
-  )
+dbt_deps() {
+  _ensure_dbt_venv
+  _dbt deps
 }
-
-start_agent() {
-  _check_openai_key
-  echo "Starting olist_agent on port 8001 ..."
-  (
-    cd "$OLIST_AGENT_DIR"
-    export OPENAI_API_KEY
-    export MCP_SERVER_URL
-    "$OLIST_AGENT_DIR/.venv/bin/python" -m src.main
-  )
-}
-
-start_streamlit() {
-  echo "Starting olist_streamlit on port 8501 ..."
-  (
-    cd "$OLIST_STREAMLIT_DIR"
-    export AGENT_URL
-    "$OLIST_STREAMLIT_DIR/.venv/bin/streamlit" run src/app.py --server.port 8501
-  )
-}
-
-# ------------------------------------------------------------------
-# Start / stop all servers
-# ------------------------------------------------------------------
-
-PIDFILE="$SCRIPT_DIR/.olist_pids"
-
-start_all() {
-  _check_openai_key
-  echo "Starting all servers in background ..."
-  rm -f "$PIDFILE"
-
-  start_mcp &
-  echo "$!" >> "$PIDFILE"
-  echo "  olist_mcp   started (pid $!)"
-
-  # Give the MCP server a moment before the agent tries to connect.
-  sleep 2
-
-  start_agent &
-  echo "$!" >> "$PIDFILE"
-  echo "  olist_agent started (pid $!)"
-
-  sleep 1
-
-  start_streamlit &
-  echo "$!" >> "$PIDFILE"
-  echo "  olist_streamlit started (pid $!)"
-
-  echo ""
-  echo "All servers running. PIDs saved to $PIDFILE"
-  echo "  MCP server : http://localhost:8000/mcp"
-  echo "  Agent API  : http://localhost:8001/ask"
-  echo "  Chat UI    : http://localhost:8501"
-  echo ""
-  echo "Stop with:  bash setenv.sh stop"
-}
-
-stop_all() {
-  if [[ ! -f "$PIDFILE" ]]; then
-    echo "No PID file found at $PIDFILE — nothing to stop."
-    return
-  fi
-  echo "Stopping servers ..."
-  while read -r pid; do
-    if kill "$pid" 2>/dev/null; then
-      echo "  Killed pid $pid"
-    fi
-  done < "$PIDFILE"
-  rm -f "$PIDFILE"
-}
-
-# ------------------------------------------------------------------
-# dbt helpers
-# ------------------------------------------------------------------
 
 dbt_debug() {
-  (cd "$OLIST_DBT_DIR" && "$OLIST_DBT_DIR/.venv/bin/dbt" debug --profiles-dir .)
+  _ensure_dbt_venv
+  _dbt debug
 }
 
 dbt_run() {
-  (cd "$OLIST_DBT_DIR" && "$OLIST_DBT_DIR/.venv/bin/dbt" run --profiles-dir .)
+  _ensure_dbt_venv
+  _dbt run
+}
+
+setup() {
+  init_data_lake
+  dbt_deps
+  dbt_run
+  echo ""
+  echo "Data lake ready. Start the stack with:"
+  echo "  docker compose up -d --build"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: bash setenv.sh <command>
+
+Host-side commands (write to data_lake/):
+  setup       One-shot: venv + init data lake + dbt deps + dbt run
+  init        Unzip olist.zip into data_lake/raw/*.parquet
+  dbt-deps    Install dbt packages
+  dbt-debug   Verify dbt's DuckDB connection
+  dbt-run     Build bronze/silver/gold Parquet from raw
+
+Runtime services are managed by Docker Compose:
+  docker compose up -d --build
+  docker compose down
+  docker compose logs -f <service>
+EOF
 }
 
 # ------------------------------------------------------------------
 # Entry point
 # ------------------------------------------------------------------
 
-# When sourced (not executed), just export the env vars and return.
-if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
-  echo "Env vars exported: OLIST_DATA_LAKE_PATH, MCP_SERVER_URL, AGENT_URL, DUCKDB_LAYERS"
-  return 0
-fi
-
 CMD="${1:-help}"
 
 case "$CMD" in
   setup)      setup ;;
-  mcp)        start_mcp ;;
-  agent)      start_agent ;;
-  streamlit)  start_streamlit ;;
-  start)      start_all ;;
-  stop)       stop_all ;;
+  init)       init_data_lake ;;
+  dbt-deps)   dbt_deps ;;
   dbt-debug)  dbt_debug ;;
   dbt-run)    dbt_run ;;
-  help|*)
-    echo "Usage: bash setenv.sh <command>"
-    echo ""
-    echo "Commands:"
-    echo "  setup       One-time: install deps, init data lake, dbt deps"
-    echo "  mcp         Start olist_mcp server (port 8000)"
-    echo "  agent       Start olist_agent server (port 8001)"
-    echo "  streamlit   Start olist_streamlit app (port 8501)"
-    echo "  start       Start all three servers in background"
-    echo "  stop        Kill all background servers"
-    echo "  dbt-debug   Run dbt debug to verify connection"
-    echo "  dbt-run     Run dbt models"
-    echo ""
-    echo "Or source it to export env vars:"
-    echo "  source setenv.sh"
-    ;;
+  help|-h|--help|*) usage ;;
 esac

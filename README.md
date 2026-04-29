@@ -1,53 +1,122 @@
 # Olist Analytics
 
-A local analytics stack built on the [Olist Brazilian e-commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Mirrors the architecture of the WS Analytics pipeline but runs entirely on your machine — no AWS, no Redshift, no cloud required.
+**Ask business questions in plain language. Get answers backed by a governed semantic layer over a dbt-built data lake.**
+
+A self-contained analytics stack on the [Olist Brazilian e-commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce). Everything runs locally — no cloud warehouse, no orchestrator — so you can experiment with semantic-layer-driven analytics, agentic data assistants, and dbt medallion modelling end to end on your machine.
+
+## What you get
+
+- **A chat interface for your data** — Streamlit UI where a LangGraph agent answers business questions using a curated set of metrics and dimensions, with every tool call inspectable inline for full transparency.
+- **A governed semantic layer** — Cube exposes named measures (revenue, order count, average delivery days, …) and dimensions (status, customer state, product category, …) over the silver-layer star schema. Joins, aggregations, and time grain handling are defined once in YAML and reused everywhere.
+- **A medallion-style data lake** — dbt models materialise raw → bronze → silver → gold Parquet on local disk via the DuckDB adapter, mirroring real warehouse patterns without a warehouse.
+- **An MCP server speaking the semantic layer** — three structured tools (`list_cubes`, `describe_cube`, `query_metrics`) any MCP-compatible client can call. The agent gets metric discovery and querying for free; you cannot write a free-form SQL query through this surface, only request known metrics — which is the whole point.
+
+## Example questions
+
+Try these in the chat UI (or via `curl` — see [Quick start](#quick-start)):
+
+- *"What were our top 10 product categories by revenue in 2017?"*
+- *"How many distinct customers placed an order in São Paulo state last year?"*
+- *"What is our average delivery time, broken down by month?"*
+- *"Which sellers have the highest average review rating, and how much did they bill?"*
+- *"Show me monthly GMV split by payment method."*
+
+Each answer is followed by a **🔧 Tool calls** expander showing exactly which measures and dimensions the agent picked, the filters it applied, and the rows Cube returned — auditable analytics by construction.
 
 ## Architecture
 
 ```
-olist_dbt  ──►  olist_cube  ──►  olist_mcp  ──►  olist_agent  ──►  olist_streamlit
-(transform)   (semantic layer)  (data access)   (ReAct agent)      (chat UI)
+                              host                                         containers
+┌──────────────────────────────────────────────────┐   ┌────────────────────────────────────────────┐
+│  data_lake/olist.zip                             │   │                                            │
+│           │                                      │   │   cube ──► olist_mcp ──► olist_agent ──► olist_streamlit
+│           ▼  init_data_lake.py                   │   │  (4000)     (8000)        (8001)         (8501)
+│   data_lake/raw/*.parquet                        │   │  semantic   tool calls    ReAct          chat UI
+│           │                                      │   │  layer      over Cube     agent          + tool-call
+│           ▼  dbt run                             │   │                                          inspector
+│   data_lake/{bronze,silver,gold}/*.parquet ──────┼──►│  (mounted read-only at /data_lake)         │
+└──────────────────────────────────────────────────┘   └────────────────────────────────────────────┘
 ```
 
+| Component                            | Role                                                                                     | Port  |
+| ------------------------------------ | ---------------------------------------------------------------------------------------- | ----- |
+| [olist_dbt/](olist_dbt/)             | dbt + DuckDB pipeline that materialises raw → bronze → silver → gold Parquet            | —     |
+| [olist_cube/](olist_cube/)           | Cube semantic layer — measures, dimensions, joins, pre-aggregations over the silver star schema | 4000  |
+| [olist_mcp/](olist_mcp/)             | FastMCP server exposing semantic-layer tools (`list_cubes`, `describe_cube`, `query_metrics`)   | 8000  |
+| [olist_agent/](olist_agent/)         | FastAPI + LangGraph ReAct agent that answers questions through MCP                                | 8001  |
+| [olist_streamlit/](olist_streamlit/) | Chat UI with per-message tool-call inspector                                                      | 8501  |
 
-| Repo                                 | Purpose                                                                     | Port |
-| ------------------------------------ | --------------------------------------------------------------------------- | ---- |
-| [olist_dbt/](olist_dbt/)             | dbt + DuckDB transforms raw Parquet through bronze → silver → gold          | —    |
-| [olist_cube/](olist_cube/)           | Cube semantic layer — metrics, dimensions, and pre-aggregations *(pending)* | —    |
-| [olist_mcp/](olist_mcp/)             | FastMCP server exposing SQL tools over the local data lake                  | 8000 |
-| [olist_agent/](olist_agent/)         | FastAPI + LangGraph ReAct agent wired to the MCP server                     | 8001 |
-| [olist_streamlit/](olist_streamlit/) | Single-page chat UI that talks to the agent                                 | 8501 |
+The pipeline is split deliberately: **dbt runs on the host** (it owns the data lake), and **the four runtime services run in containers** (they read the data lake as a read-only volume). This keeps the dbt iteration loop fast (no rebuild needed) while service deployment stays reproducible.
 
+## Quick start
 
-### Data flow
+### Prerequisites
 
-```
-olist.zip
-    │
-    ▼  (init_data_lake.py)
-data_lake/raw/*.parquet          ← 9 source tables as Parquet
-    │
-    ▼  (dbt run)
-data_lake/bronze/*.parquet
-data_lake/silver/*.parquet
-data_lake/gold/*.parquet
-    │
-    ▼  (DuckDB views, registered at startup)
-olist_mcp  :8000
-    │
-    ▼  (MCP tools: query_database, list_tables, describe_table, get_dataset_summary)
-olist_agent  :8001  POST /ask
-    │
-    ▼  (HTTP)
-olist_streamlit  :8501
+- Docker Desktop (or any Docker Engine + Compose v2)
+- Python 3.11+ (for dbt on the host)
+- An OpenAI API key
+- The Olist dataset zip at `data_lake/olist.zip` — download from [Kaggle](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
+
+### 1. Configure environment
+
+```bash
+cp .env.example .env
+# edit .env and set OPENAI_API_KEY=sk-...
 ```
 
-## Dataset
+`docker compose` reads `.env` automatically.
 
-The Olist dataset covers a Brazilian e-commerce marketplace from 2016 to 2018 and contains nine tables:
+### 2. Build the data lake (one-off, host-side)
 
+```bash
+bash setenv.sh setup
+```
 
-| Table                               | Description                                                |
+This unzips the source data, sets up dbt, and runs the medallion pipeline. You only re-run it when the source data or dbt models change.
+
+### 3. Start the stack
+
+```bash
+docker compose up -d --build
+```
+
+Wait ~30 seconds for Cube's healthcheck, then open:
+
+| URL                                  | What you'll find                                |
+| ------------------------------------ | ----------------------------------------------- |
+| <http://localhost:8501>              | Chat UI (start here)                            |
+| <http://localhost:4000>              | Cube Playground — explore measures & dimensions |
+| <http://localhost:8001/docs>         | Agent OpenAPI docs                              |
+| <http://localhost:8000/mcp>          | MCP server endpoint                             |
+
+### 4. Ask a question
+
+Through the UI, or directly:
+
+```bash
+curl -sS -X POST http://localhost:8001/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "what are the top 5 product categories by revenue?"}' \
+  | jq
+```
+
+The response includes a `sources` array with every MCP tool call the agent made, in order.
+
+### 5. Stop the stack
+
+```bash
+docker compose down
+```
+
+Add `-v` to also drop Cube's persistent pre-aggregation store. The host data lake is untouched.
+
+## The data model
+
+### Source dataset
+
+Olist is a Brazilian e-commerce marketplace; the dataset spans 2016–2018:
+
+| Source table                        | Description                                                |
 | ----------------------------------- | ---------------------------------------------------------- |
 | `orders`                            | Order lifecycle — status, purchase and delivery timestamps |
 | `customers`                         | Customer geographic identifiers                            |
@@ -59,170 +128,144 @@ The Olist dataset covers a Brazilian e-commerce marketplace from 2016 to 2018 an
 | `geolocation`                       | Zip code → latitude/longitude lookup                       |
 | `product_category_name_translation` | Portuguese → English category names                        |
 
+### dbt medallion layers
 
-## Prerequisites
+| Layer  | Location            | Role                                          |
+| ------ | ------------------- | --------------------------------------------- |
+| Raw    | `data_lake/raw/`    | Views over source Parquet — no transformation |
+| Bronze | `data_lake/bronze/` | Cleaned and typed staging tables              |
+| Silver | `data_lake/silver/` | Star-schema facts and dimensions — **Cube reads here** |
+| Gold   | `data_lake/gold/`   | Wide, denormalised analytics tables           |
 
-- Python 3.11+
-- An OpenAI API key (used by `olist_agent`)
+### Cubes (the analyst-facing surface)
 
-## Quick start
+Defined in [`olist_cube/model/cubes/`](olist_cube/model/cubes/):
 
-### 1. Set your OpenAI key
+| Cube          | Source                              | What's exposed                                                       |
+| ------------- | ----------------------------------- | -------------------------------------------------------------------- |
+| `orders`      | `silver/fact_orders.parquet`        | Revenue, freight, AOV, order count, delivery days, payment type, status |
+| `customers`   | `silver/dim_customers.parquet`      | Customer count, average lifetime spend, city/state                   |
+| `products`    | `silver/dim_products.parquet`       | Product count, average price, average rating, category               |
+| `sellers`     | `silver/dim_sellers.parquet`        | Seller count, average revenue, average rating, city/state            |
+| `geolocation` | `silver/dim_geolocation.parquet`    | Zip-code centroids                                                   |
+| `dates`       | `silver/dim_date.parquet`           | Calendar — year, quarter, month, week, day name, weekend flag        |
 
-```bash
-export OPENAI_API_KEY=sk-...
-```
+Joins between cubes (e.g. `orders` ↔ `customers`) are declared once in YAML; users never write them.
 
-Or open [setenv.sh](setenv.sh) and fill in the `OPENAI_API_KEY` line near the top.
+## Extending the model (for analytics engineers)
 
-### 2. One-time setup
+### Add a new measure or dimension
 
-Run from the `olist_project/` directory:
+1. Edit the relevant YAML under [`olist_cube/model/cubes/`](olist_cube/model/cubes/), e.g. add a measure to `fact_orders.yml`.
+2. Reload Cube:
 
-```bash
-bash setenv.sh setup
-```
+   ```bash
+   docker compose restart cube
+   ```
 
-This will:
+3. The new field is immediately discoverable through `list_cubes` / `describe_cube`. Restart the agent so it picks up the refreshed schema description on its next conversation:
 
-1. Create a `.venv` in each repo and install its dependencies
-2. Unzip `olist.zip` and convert the 9 CSVs to Parquet under `olist_dbt/data_lake/raw/`
-3. Install dbt packages (`dbt deps`)
+   ```bash
+   docker compose restart olist_agent
+   ```
 
-### 3. Build the dbt models
+### Add a new dbt model
 
-Once models are implemented, run:
+1. Add a SQL file under `olist_dbt/models/{bronze_layer,silver_layer,gold_layer}/`.
+2. Rebuild the Parquet:
 
-```bash
-bash setenv.sh dbt-run
-```
+   ```bash
+   bash setenv.sh dbt-run
+   ```
 
-To verify the dbt connection first:
+3. If you exposed it through Cube too, add a YAML cube and restart Cube as above.
 
-```bash
-bash setenv.sh dbt-debug
-```
+### Iterate on agent behaviour
 
-### 4. Start the servers
-
-```bash
-bash setenv.sh start
-```
-
-This starts all three servers in the background and prints their URLs:
-
-```
-MCP server : http://localhost:8000/mcp
-Agent API  : http://localhost:8001/ask
-Chat UI    : http://localhost:8501
-```
-
-Open `http://localhost:8501` in your browser to start chatting.
-
-### 5. Stop the servers
+The agent's system prompt lives in [`olist_agent/src/services/agent_service.py`](olist_agent/src/services/agent_service.py); MCP tool docstrings live in [`olist_mcp/src/tools/cube.py`](olist_mcp/src/tools/cube.py). Both feed into how the LLM frames queries — adjust them when you want to tighten or relax behaviour. After editing either:
 
 ```bash
-bash setenv.sh stop
-```
-
-## Running servers individually
-
-Each server can be started in the foreground for development:
-
-```bash
-bash setenv.sh mcp        # olist_mcp   — port 8000
-bash setenv.sh agent      # olist_agent — port 8001
-bash setenv.sh streamlit  # olist_streamlit — port 8501
+docker compose up -d --build olist_mcp olist_agent
 ```
 
 ## Configuration
 
-All configuration lives in [setenv.sh](setenv.sh). The key variables:
+All variables flow through [docker-compose.yml](docker-compose.yml). The user-facing knobs:
 
+| Variable             | Default                  | Used by                                                          |
+| -------------------- | ------------------------ | ---------------------------------------------------------------- |
+| `OPENAI_API_KEY`     | *(required)*             | `olist_agent` — LLM provider                                     |
+| `OPENAI_MODEL`       | `gpt-4o-mini`            | `olist_agent` — LangChain `ChatOpenAI` model                     |
+| `CUBEJS_API_SECRET`  | `dev-secret`             | `cube`, `olist_mcp` — JWT secret (auth disabled in dev mode)     |
+| `DUCKDB_LAYERS`      | `Silver`                 | `olist_mcp` — which `data_lake/` layers to register as DuckDB views |
 
-| Variable               | Default                     | Description                                                                 |
-| ---------------------- | --------------------------- | --------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`       | *(required)*                | API key for the LLM used by olist_agent                                     |
-| `OLIST_DATA_LAKE_PATH` | `olist_dbt/data_lake`       | Absolute path to the data lake root                                         |
-| `MCP_SERVER_URL`       | `http://localhost:8000/mcp` | URL the agent uses to reach the MCP server                                  |
-| `AGENT_URL`            | `http://localhost:8001/ask` | URL Streamlit uses to reach the agent                                       |
-| `DUCKDB_LAYERS`        | `Silver`                    | Comma-separated layers exposed by the MCP server (`Raw,Bronze,Silver,Gold`) |
+Service-internal URLs (`MCP_SERVER_URL`, `CUBE_API_URL`, `AGENT_URL`) resolve over the `olist_net` Docker network and don't need to be set by hand.
 
-
-Each repo also accepts a `.env` file. Copy [olist_agent/.env.example](olist_agent/.env.example) to `olist_agent/.env` to configure the agent independently of `setenv.sh`.
+For local development outside Docker, each service supports a per-folder `.env` via `pydantic-settings`.
 
 ## Project structure
 
 ```
 olist_project/
-├── olist.zip                       # source dataset
-├── setenv.sh                       # setup + server launcher
+├── docker-compose.yml             # all four runtime services
+├── setenv.sh                      # host-side: data lake + dbt helpers
+├── .env.example                   # OPENAI_API_KEY, CUBEJS_API_SECRET, …
 │
-├── olist_dbt/                      # dbt project
+├── data_lake/                     # NOT versioned — produced by setenv.sh
+│   ├── olist.zip                  # source dataset (download from Kaggle)
+│   └── {raw,bronze,silver,gold}/  # Parquet outputs of the medallion pipeline
+│
+├── olist_dbt/                     # dbt project (host-only)
 │   ├── dbt_project.yml
-│   ├── profiles.yml                # DuckDB adapter, external_root = data_lake/
-│   ├── packages.yml                # dbt-utils
-│   ├── macros/
-│   │   └── external_location.sql  # routes external tables to data_lake/{layer}/
-│   ├── models/
-│   │   ├── raw/                    # views over data_lake/raw/*.parquet
-│   │   ├── bronze_layer/           # external Parquet → data_lake/bronze/
-│   │   ├── silver_layer/           # external Parquet → data_lake/silver/
-│   │   └── gold_layer/             # external Parquet → data_lake/gold/
-│   ├── scripts/
-│   │   └── init_data_lake.py      # unzip + CSV → Parquet
-│   └── data_lake/                  # created by init_data_lake.py + dbt run
-│       ├── raw/
-│       ├── bronze/
-│       ├── silver/
-│       └── gold/
+│   ├── profiles.yml               # DuckDB adapter, external_root → ../data_lake
+│   ├── packages.yml               # dbt-utils
+│   ├── macros/external_location.sql
+│   ├── models/{raw,bronze_layer,silver_layer,gold_layer}/
+│   └── scripts/init_data_lake.py
 │
-├── olist_cube/                     # Cube semantic layer (pending)
-│   └── README.md
+├── olist_cube/                    # Cube semantic layer
+│   ├── cube.yml
+│   └── model/cubes/               # one YAML per cube
 │
-├── olist_mcp/                      # FastMCP server
+├── olist_mcp/                     # FastMCP server
 │   └── src/
 │       ├── server.py
-│       ├── config.py               # data_lake_path, duckdb_layers
-│       ├── tools/database.py       # query_database, list_tables, describe_table, get_dataset_summary
-│       └── utils/duckdb_client.py  # discovers + registers DuckDB views from local Parquet
+│       ├── tools/cube.py          # list_cubes / describe_cube / query_metrics
+│       └── utils/{cube_client.py, duckdb_client.py, logger.py}
 │
-├── olist_agent/                    # FastAPI + LangGraph agent
+├── olist_agent/                   # FastAPI + LangGraph
 │   └── src/
-│       ├── main.py                 # FastAPI app, connects to olist_mcp at startup
-│       ├── config.py
-│       ├── models.py               # QueryRequest / QueryResponse
-│       ├── api/endpoints/ask.py    # POST /ask
-│       └── services/agent_service.py  # ReAct agent + system prompt
+│       ├── main.py                # connects to MCP, builds ReAct agent
+│       ├── api/endpoints/ask.py   # POST /ask
+│       └── services/agent_service.py
 │
-└── olist_streamlit/                # Chat UI
-    └── src/
-        └── app.py                  # single-page Streamlit chat interface
+└── olist_streamlit/               # Chat UI
+    └── src/app.py
 ```
 
-## MCP tools
+## Development workflow
 
-The MCP server exposes four tools to the agent:
+| You changed…                       | What to run                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| A dbt model                        | `bash setenv.sh dbt-run` then `docker compose restart cube`              |
+| A Cube YAML                        | `docker compose restart cube olist_agent`                                |
+| MCP tool code or system prompt     | `docker compose up -d --build olist_mcp olist_agent`                     |
+| Streamlit UI                       | `docker compose up -d --build olist_streamlit`                           |
 
+Tail logs of any single service:
 
-| Tool                  | Description                                          |
-| --------------------- | ---------------------------------------------------- |
-| `list_tables`         | List all registered tables with their pipeline layer |
-| `describe_table`      | Column names, types, and nullability for a table     |
-| `query_database`      | Execute a read-only SQL query (auto-LIMIT applied)   |
-| `get_dataset_summary` | Row counts for all registered tables                 |
+```bash
+docker compose logs -f olist_mcp
+```
 
+### `setenv.sh` reference
 
-By default only the Silver layer is exposed. To open all layers, set `DUCKDB_LAYERS=Raw,Bronze,Silver,Gold` before starting the MCP server.
+`setenv.sh` is intentionally minimal — service lifecycle belongs to Docker Compose. It only handles host-side tasks that write to `data_lake/`:
 
-## dbt medallion layers
-
-
-| Layer  | Schema   | Location            | Purpose                                       |
-| ------ | -------- | ------------------- | --------------------------------------------- |
-| Raw    | `raw`    | `data_lake/raw/`    | Views over source Parquet — no transformation |
-| Bronze | `bronze` | `data_lake/bronze/` | Cleaned and typed staging tables              |
-| Silver | `silver` | `data_lake/silver/` | Star schema facts and dimensions              |
-| Gold   | `gold`   | `data_lake/gold/`   | Wide, denormalised analytics tables           |
-
-
+| Command                    | What it does                                              |
+| -------------------------- | --------------------------------------------------------- |
+| `bash setenv.sh setup`     | One-shot: venv + init data lake + `dbt deps` + `dbt run`  |
+| `bash setenv.sh init`      | Unzip `olist.zip` into `data_lake/raw/*.parquet`          |
+| `bash setenv.sh dbt-deps`  | Install dbt packages                                      |
+| `bash setenv.sh dbt-debug` | Verify dbt's DuckDB connection                            |
+| `bash setenv.sh dbt-run`   | Build bronze/silver/gold from raw                         |
