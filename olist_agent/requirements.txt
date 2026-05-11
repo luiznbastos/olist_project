@@ -8,3 +8,4 @@ langchain-mcp-adapters
 httpx
 pydantic
 pydantic-settings
+claude-agent-sdk
