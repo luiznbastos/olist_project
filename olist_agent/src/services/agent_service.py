@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -50,7 +50,7 @@ If the question is unrelated to Olist e-commerce, say you are not able to answer
 
 class AgentService:
     def __init__(self, llm: ChatOpenAI, tools: List[BaseTool]):
-        self.agent = create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
+        self.agent = create_agent(llm, tools, system_prompt=SYSTEM_PROMPT)
         logger.info("AgentService initialized with %d tools", len(tools))
 
     def _extract_response(self, final_state: dict) -> str:
